@@ -28,8 +28,8 @@ BeforeSuite(async (I) => {
     await I.createServiceWithRoles(serviceName, serviceRoles, serviceName + "_beta", token);
     await I.createUserWithRoles(adminEmail, 'Admin', [serviceName + "_admin", "IDAM_ADMIN_USER"]);
 
-    var pin = await I.getPin(randomUserFirstName, randomUserLastName);
-    var code = await I.loginAsPin(pin, serviceName, redirectUri);
+    var pinUser = await I.getPinUser(randomUserFirstName, randomUserLastName);
+    var code = await I.loginAsPin(pinUser.pin, serviceName, redirectUri);
     accessToken = await I.getAccessToken(code, serviceName, redirectUri, clientSecret);
 });
 
@@ -43,11 +43,11 @@ return Promise.all([
 
  Scenario('@functional @uplift I am able to use a pin to create an account as an uplift user', async (I) => {
      I.amOnPage(TestData.WEB_PUBLIC_URL + '/login/uplift?client_id=' + serviceName + '&redirect_uri=' + redirectUri + '&jwt=' + accessToken);
-     I.wait(10);
+     I.waitForText('Create an account or sign in', 30, 'h1');
      I.fillField('#firstName', randomUserFirstName);
      I.fillField('#lastName', randomUserLastName);
      I.fillField('#username', citizenEmail);
-     //XB: I.scrollPageToBottom();
+     I.scrollPageToBottom();
      I.click('Continue');
      I.waitForText('Check your email', 20, 'h1');
      var url = await I.extractUrl(citizenEmail);
@@ -56,9 +56,10 @@ return Promise.all([
      }
      I.amOnPage(url);
      I.waitForText('Create a password', 20, 'h1');
-     I.fillField('#password1', 'Passw0rd1234');
-     I.fillField('#password2', 'Passw0rd1234');
+     I.fillField('#password1', password);
+     I.fillField('#password2', password);
      I.click('Continue');
-     I.waitForText('Account created', 20, 'h1');
+     I.waitForText('Account created', 60, 'h1');
      I.see('You can now sign in to your account.');
- }).retry(TestData.SCENARIO_RETRY_LIMIT);
+ });
+ // NOTE: Retrying this scenario is problematic.

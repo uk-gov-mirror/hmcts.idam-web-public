@@ -1,23 +1,60 @@
 #!groovy
 
+//properties([
+//        pipelineTriggers([cron('10 21 * * *')])
+//
+//        parameters([
+//            string(name: 'URL_TO_TEST', defaultValue: 'https://div-pfe-aat.service.core-compute-aat.internal', description: 'The URL you want to run these tests against'),
+//        ])
+//])
 properties([
-        pipelineTriggers([cron('10 21 * * *')])
+    pipelineTriggers([cron('00 21 * * *')]),
+    parameters([
+        string(name: 'URL_TO_TEST', defaultValue: 'http://idam-web-admin-idam-preview.service.core-compute-idam-preview.internal', description: 'The URL you want to run these tests against'),
+        string(name: 'ACCESS_KEY', defaultValue: 'a3a5fa68-4316-4b67-aa9f-3e614b438da7', description: 'Idam sauce access key'),
+        string(name: 'PASSWORD',  defaultValue: 'Ref0rmIsFun', description: 'password'),
+        string(name: 'API_KEY', defaultValue: 'sidam_initial_testing_key-b7ab8862-25b4-41c9-8311-cb78815f7d2d-d9afb6d8-2f88-40c7-911d-ace72f3fc19b', description: 'ApiKey'),
+        string(name: 'TUNNELIDENTIFIER', defaultValue: 'reformtunnel', description: 'Saucelan Tunnel identifier'),
+        string(name: 'API', defaultValue: 'https://idam-api.preview.platform.hmcts.net', description: 'The URL of Idam-Api'),
+        string(name: 'TESTUSERNAME', defaultValue: 'idamOwner@HMCTS.NET', description: 'User name'),
+        string(name: 'PROXY', defaultValue: 'http://proxyout.reform.hmcts.net:8080', description: 'Proxy server'),
+        string(name: 'SAUCEUSERNAME', defaultValue: 'idam', description: 'Sauce User name'),
+
+
+
+
+    ])
 ])
 
 @Library("Infrastructure")
 
-def type = "java"
 
 def product = "idam"
 
 def component = "web-public"
 
 withNightlyPipeline(type, product, component) {
+    env.TEST_URL = params.URL_TO_TEST
+    env.SAUCE_ACCESS_KEY=params.ACCESS_KEY
+    env.SMOKE_TEST_USER_PASSWORD=params.PASSWORD
+    env.NOTIFY_API_KEY=params.API_KEY
+    env.TUNNEL_IDENTIFIER=params.TUNNELIDENTIFIER
+    env.IDAMAPI=params.API
+    env.SMOKE_TEST_USER_USERNAME=params.TESTUSERNAME
+    env.SAUCE_USERNAME=params.SAUCEUSERNAME
+    env.PROXY_SERVER=params.PROXY
+    env.NODE_TLS_REJECT_UNAUTHORIZED=0
 
-    enableMutationTest()
+//    enableMutationTest()
+//
+//    after('mutationTest') {
+//        withSonarQubeEnv("SonarQube") {
+//          sh "./gradlew --info sonarqube"
+//        }
+//    }
 
-    after('mutationTest') {
+    withNightlyPipeline("nodejs", product, component) {
 
-        sh "./gradlew --info sonarqube"
+        enableCrossBrowserTest()
     }
 }

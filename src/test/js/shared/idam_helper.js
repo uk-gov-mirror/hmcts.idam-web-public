@@ -88,13 +88,17 @@ class IdamHelper extends Helper {
         .catch(err => err);
     }
 
-    createServiceWithRoles(serviceName, serviceRoles, betaRole, token) {
+    createServiceWithRoles(serviceName, serviceRoles, betaRole, token, scope) {
+        if(scope == null) {
+            scope = ''
+        }
         const data = {
             label: serviceName,
             description: serviceName,
             oauth2ClientId: serviceName,
             oauth2ClientSecret: 'autotestingservice',
             oauth2RedirectUris: ['https://idam.testservice.gov.uk'],
+            oauth2Scope: scope,
             onboardingEndpoint: '/autotest',
             onboardingRoles: [betaRole],
             allowedRoles: serviceRoles,
@@ -277,7 +281,7 @@ class IdamHelper extends Helper {
         var regex = "(https.+)"
         var url = emailResponse.body.match(regex);
         if (url[0]) {
-            return url[0].replace('https://idam-web-public.aat.platform.hmcts.net', TestData.WEB_PUBLIC_URL);
+            return url[0].replace(/https:\/\/idam-web-public\..+?\.platform\.hmcts\.net/i, TestData.WEB_PUBLIC_URL);
         }
     }
   }
