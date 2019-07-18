@@ -7,8 +7,8 @@ data "terraform_remote_state" "core-infra" {
 
   config {
     resource_group_name  = "mgmt-state-store-${var.subscription}"
-    storage_account_name = "mgmtstatestore${var.subscription}"
-    container_name       = "mgmtstatestorecontainer${var.env}"
+    storage_account_name = "statestore${var.subscription}"
+    container_name       = "statectr${var.env}"
     key                  = "core-infra/${var.env}/terraform.tfstate"
   }
 }
