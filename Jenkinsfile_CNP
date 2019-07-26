@@ -14,6 +14,7 @@ env.DEMO_ENVIRONMENT_NAME    = 'idam-demo'
 env.PREVIEW_ENVIRONMENT_NAME = 'idam-preview'
 env.PERFTEST_ENVIRONMENT_NAME = 'idam-perftest'
 env.ITHC_ENVIRONMENT_NAME = 'idam-ithc'
+env.ETHOSLDATA_ENVIRONMENT_NAME = 'idam-ethosldata'
 
 List<LinkedHashMap<String, Object>> secrets = [
     secret('smoke-test-user-username', 'SMOKE_TEST_USER_USERNAME'),
