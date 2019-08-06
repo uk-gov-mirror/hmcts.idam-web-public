@@ -36,6 +36,7 @@ public class TestConstants {
     public static final String LOGIN_WITH_PIN_ENDPOINT = "/loginWithPin";
     public static final String ACTIVATE_ENDPOINT = "/activate";
     public static final String OAUTH2_AUTHORIZE_ENDPOINT = "oauth2/authorize";
+    public static final String AUTHENTICATE_ENDPOINT = "authenticate";
     public static final String VALIDATE_RESET_PASSWORD_ENDPOINT = "validateResetPasswordToken";
     public static final String SELF_REGISTRATION_ENDPOINT = "users/selfregister";
     public static final String DETAILS_ENDPOINT = "details";
@@ -80,6 +81,7 @@ public class TestConstants {
     public static final String USER_FIRST_NAME = "Jimmy";
     public static final String USER_LAST_NAME = "GREGORY";
     public static final String USER_PASSWORD = "Passw0rd";
+    public static final String USER_IP_ADDRESS = "192.168.0.1";
     public static final String LONG_PASSWORD = "Looooooooooooooooooooooooodp49v83tun29340bt89vgnj0cucvh5b0t78yvn078fu4nb087vhn0834ynb0v75yb0nv785yngb0745n0v45yb784yntv307450bty74n0dp49v83tun29340bt89vgnj0cucvh5b0t78yvn078fu4nb087vhn0834ynb0v75yb0nv785yngb0745n0v45yb784yntv307450bty74n0dp49v83tun29340bt89vgnj0cucvh5b0t78yvn078fu4nb087vhn0834ynb0v75yb0nv785yngb0745n0v45yb784yntv307450bty74n0ng";
     public static final String SHORT_PASSWORD = "Short";
     public static final String PASSWORD_ONE = "password1";
@@ -156,7 +158,7 @@ public class TestConstants {
     public static final String CLIENT_ID = "clientId";
     public static final String REDIRECTURI = "redirectUri";
     public static final String CUSTOM_SCOPE = "manage-roles";
-
+    public static final String AUTHENTICATE_SESSION_COOKE = "IPlanetDirectoryPro=A_TASTY_TREAT";
 
     //Responses
     public static final String PASSWORD_BLACKLISTED_RESPONSE = "{\"code\":\"PASSWORD_BLACKLISTED\"}";

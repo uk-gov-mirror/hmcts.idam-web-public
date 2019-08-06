@@ -1,6 +1,8 @@
 package uk.gov.hmcts.reform.idam.web.strategic;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -30,16 +32,18 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.extern.slf4j.Slf4j;
-import uk.gov.hmcts.reform.idam.api.model.ActivationResult;
-import uk.gov.hmcts.reform.idam.api.model.ArrayOfServices;
-import uk.gov.hmcts.reform.idam.api.model.ForgotPasswordRequest;
-import uk.gov.hmcts.reform.idam.api.model.ResetPasswordRequest;
-import uk.gov.hmcts.reform.idam.api.model.User;
-import uk.gov.hmcts.reform.idam.api.model.ValidateRequest;
+import uk.gov.hmcts.reform.idam.api.internal.model.ActivationResult;
+import uk.gov.hmcts.reform.idam.api.internal.model.ArrayOfServices;
+import uk.gov.hmcts.reform.idam.api.internal.model.ForgotPasswordRequest;
+import uk.gov.hmcts.reform.idam.api.internal.model.ResetPasswordRequest;
+import uk.gov.hmcts.reform.idam.api.shared.model.User;
+import uk.gov.hmcts.reform.idam.api.internal.model.ValidateRequest;
 import uk.gov.hmcts.reform.idam.web.config.properties.ConfigurationProperties;
 import uk.gov.hmcts.reform.idam.web.health.HealthCheckStatus;
 import uk.gov.hmcts.reform.idam.web.model.RegisterUserRequest;
 import uk.gov.hmcts.reform.idam.web.model.SelfRegisterRequest;
+
+import static com.netflix.zuul.constants.ZuulHeaders.X_FORWARDED_FOR;
 
 @Slf4j
 @Service
@@ -54,7 +58,6 @@ public class SPIService {
         this.restTemplate = restTemplate;
         this.configurationProperties = configurationProperties;
     }
-
 
     /**
      * @should call IDM with the right  body
@@ -75,7 +78,6 @@ public class SPIService {
 
         return restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl() + "/" + configurationProperties.getStrategic().getEndpoint().getActivation(), HttpMethod.PATCH, entity, String.class);
     }
-
 
     /**
      * @should call api with the correct data and return api response body if response code is 200
@@ -119,20 +121,51 @@ public class SPIService {
     }
 
     /**
+     * @should return null if no cookie is found
+     * @should return a set-cookie header
+     */
+    public String authenticate(final String username, final String password, final String ipAddress) {
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>(2);
+        form.add("username", username);
+        form.add("password", password);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        headers.add(X_FORWARDED_FOR, ipAddress);
+        ResponseEntity<Void> response = restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl()
+                + "/" + configurationProperties.getStrategic().getEndpoint().getAuthorize(), HttpMethod.POST,
+            new HttpEntity<>(form, headers), Void.class);
+
+        if (response.getHeaders().containsKey(HttpHeaders.SET_COOKIE)) {
+            return response.getHeaders().get(HttpHeaders.SET_COOKIE).stream()
+                .findFirst().orElse(null);
+        } else {
+            return null;
+        }
+    }
+
+    /**
      * @should call api with the correct data and return location in header in api response if response code is 302
      * @should not send state and scope parameters in form if they are not send as parameter in the service
      * @should return null if api response code is not 302
      */
-    public String authorize(final String username, final String password, final String redirectUri, final String state, final String clientId, final String scope) {
+    public String authorize(final Map<String, String> params, final String cookie) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        if (cookie != null) {
+            headers.add(HttpHeaders.COOKIE, cookie);
+        }
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>(14);
+        params.forEach(form::add);
+        HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(form, headers);
 
-        HttpEntity<MultiValueMap<String, String>> entity = prepareOauth2AuthenticationRequest(username, password, redirectUri, state, clientId, scope);
-
-        ResponseEntity<String> response = restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl() + "/" + configurationProperties.getStrategic().getEndpoint().getAuthorizeOauth2(), HttpMethod.POST, entity,
-            String.class);
+        ResponseEntity<String> response = restTemplate.exchange(configurationProperties.getStrategic()
+                .getService().getUrl() + "/" + configurationProperties.getStrategic()
+                .getEndpoint().getAuthorizeOauth2(),
+            HttpMethod.POST, entity, String.class);
 
         if (response.getStatusCode() == HttpStatus.FOUND) {
-            String location = response.getHeaders().getLocation().toString();
-            return location;
+            return response.getHeaders().getLocation().toString();
         } else {
             return null;
         }
@@ -142,7 +175,7 @@ public class SPIService {
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.add("pin", pin);
+        headers.add("pin", pin); //NOSONAR
 
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
@@ -161,8 +194,7 @@ public class SPIService {
         String requestUrl = sb.toString();
         log.debug("Logging in with PIN to url: {}", redirectUri);
 
-        ResponseEntity<String> response = getCustomRestTemplate().exchange(requestUrl, HttpMethod.GET, entity,
-            String.class);
+        ResponseEntity<String> response = getCustomRestTemplate().exchange(requestUrl, HttpMethod.GET, entity, String.class); // NOSONAR
         if (response.getStatusCode() == HttpStatus.FOUND) {
             String location = response.getHeaders().getLocation().toString();
             return location;
@@ -177,7 +209,8 @@ public class SPIService {
             .disableAuthCaching()
             .useSystemProperties()
             .setRedirectStrategy(new LaxRedirectStrategy() {
-                @Override protected boolean isRedirectable(String method) {
+                @Override
+                protected boolean isRedirectable(String method) {
                     return false;
                 }
             }).build();
@@ -214,8 +247,8 @@ public class SPIService {
     public ResponseEntity<String> validateResetPasswordToken(final String token, final String code) throws IOException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.add("token", token);
-        headers.add("code", code);
+        headers.add("token", token); //NOSONAR
+        headers.add("code", code); //NOSONAR
 
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
@@ -254,7 +287,7 @@ public class SPIService {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        uk.gov.hmcts.reform.idam.api.model.SelfRegisterRequest request = new uk.gov.hmcts.reform.idam.api.model.SelfRegisterRequest();
+        uk.gov.hmcts.reform.idam.api.shared.model.SelfRegisterRequest request = new uk.gov.hmcts.reform.idam.api.shared.model.SelfRegisterRequest();
         request.setFirstName(registerUserRequest.getFirstName());
         request.setLastName(registerUserRequest.getLastName());
         request.setEmail(registerUserRequest.getUsername());
@@ -262,7 +295,7 @@ public class SPIService {
         request.setRedirectUri(registerUserRequest.getRedirect_uri());
         request.setState(registerUserRequest.getState());
 
-        HttpEntity<uk.gov.hmcts.reform.idam.api.model.SelfRegisterRequest> requestEntity = new HttpEntity<>(request, headers);
+        HttpEntity<uk.gov.hmcts.reform.idam.api.shared.model.SelfRegisterRequest> requestEntity = new HttpEntity<>(request, headers);
         return restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl() + "/" + configurationProperties.getStrategic().getEndpoint().getSelfRegisterUser() + "?jwt=" + registerUserRequest.getJwt(), HttpMethod.POST, requestEntity, String.class);
     }
 
@@ -276,7 +309,6 @@ public class SPIService {
         headers.setContentType(MediaType.APPLICATION_JSON);
 
         HttpEntity<String> entity = new HttpEntity<>(mapper.writeValueAsString(selfRegisterRequest), headers);
-
 
         return restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl() + "/" + configurationProperties.getStrategic().getEndpoint().getSelfRegistration(), HttpMethod.POST, entity, String.class);
     }
@@ -292,32 +324,25 @@ public class SPIService {
      * @should call api with the correct data and return api response if status code is 200
      * @should return optional empty if status code is not 200
      * @should return optional empty if any Exception occurs
-     * @should return optional empty if api response is null
      */
     public Optional<User> getDetails(String token) {
 
-        ResponseEntity<User> response = null;
+        ResponseEntity<User> response;
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.add("authorization", token);
+        headers.add("authorization", token); //NOSONAR
 
         HttpEntity<String> entity = new HttpEntity<>("parameters", headers);
 
         try {
 
             response = restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl() + "/" + configurationProperties.getStrategic().getEndpoint().getDetails(), HttpMethod.GET, entity, User.class);
-
+            return Optional.of(response.getBody());
         } catch (Exception e) {
             log.error("Error getting User Details", e);
             return Optional.empty();
         }
-
-        if (Objects.nonNull(response) && response.getStatusCode().equals(HttpStatus.OK)) {
-            return Optional.of(response.getBody());
-        }
-
-        return Optional.empty();
     }
 
     /**
@@ -325,37 +350,14 @@ public class SPIService {
      * @should return Optional empty if api returns an http status different from 200
      * @should return Optional empty if api returns empty response body
      */
-    public Optional<uk.gov.hmcts.reform.idam.api.model.Service> getServiceByClientId(String clientId) {
+    public Optional<uk.gov.hmcts.reform.idam.api.internal.model.Service> getServiceByClientId(String clientId) {
 
-        ResponseEntity<ArrayOfServices> response = restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl() + "/" + configurationProperties.getStrategic().getEndpoint().getServices() + "?clientId=" + clientId, HttpMethod.GET, HttpEntity.EMPTY, ArrayOfServices.class);
+        ResponseEntity<ArrayOfServices> response =
+            restTemplate.exchange(configurationProperties.getStrategic().getService().getUrl() + "/" + configurationProperties.getStrategic().getEndpoint().getServices() + "?clientId=" + clientId, HttpMethod.GET, HttpEntity.EMPTY, ArrayOfServices.class); //NOSONAR
 
         if (Objects.nonNull(response.getBody()) && !response.getBody().isEmpty()) {
             return Optional.of(response.getBody().get(0));
         }
         return Optional.empty();
-    }
-
-
-    private HttpEntity<MultiValueMap<String, String>> prepareOauth2AuthenticationRequest(final String username, final String password,
-                                                                                         final String redirectUri, final String state,
-                                                                                         final String clientId, final String scope) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
-
-
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>(4);
-
-        form.add("username", username);
-        form.add("password", password);
-        form.add("redirect_uri", redirectUri);
-        form.add("client_id", clientId);
-        if (state != null) {
-            form.add("state", state);
-        }
-        if (scope != null) {
-            form.add("scope", scope);
-        }
-
-        return new HttpEntity<>(form, headers);
     }
 }

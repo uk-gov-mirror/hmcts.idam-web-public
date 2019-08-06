@@ -33,10 +33,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lombok.extern.slf4j.Slf4j;
-import uk.gov.hmcts.reform.idam.api.model.ActivationResult;
-import uk.gov.hmcts.reform.idam.api.model.ErrorResponse;
-import uk.gov.hmcts.reform.idam.api.model.Service;
-import uk.gov.hmcts.reform.idam.api.model.ValidateRequest;
+import uk.gov.hmcts.reform.idam.api.internal.model.ActivationResult;
+import uk.gov.hmcts.reform.idam.api.internal.model.ErrorResponse;
+import uk.gov.hmcts.reform.idam.api.internal.model.Service;
+import uk.gov.hmcts.reform.idam.api.internal.model.ValidateRequest;
 import uk.gov.hmcts.reform.idam.web.helper.ErrorHelper;
 import uk.gov.hmcts.reform.idam.web.model.SelfRegisterRequest;
 import uk.gov.hmcts.reform.idam.web.strategic.SPIService;
@@ -51,11 +51,11 @@ import uk.gov.hmcts.reform.idam.web.strategic.ValidationService;
 public class UserController {
 
     private static final String ERROR_MSG = "errorMsg";
-    public static final String ERROR_SUB_MSG = "errorSubMsg";
-    private static final String GENERIC_ERROR_KEY = "public.error.page.generic.error";
-    private static final String GENERIC_SUB_ERROR_KEY = "public.error.page.generic.sub.error";
+    private static final String ERROR_SUB_MSG = "errorSubMsg";
+    static final String GENERIC_ERROR_KEY = "public.error.page.generic.error";
+    static final String GENERIC_SUB_ERROR_KEY = "public.error.page.generic.sub.error";
     private static final String ALREADY_ACTIVATED_KEY = "public.error.page.already.activated.description";
-    public static final String PAGE_NOT_FOUND_VIEW = "404";
+    private static final String PAGE_NOT_FOUND_VIEW = "404";
 
     @Autowired
     private ObjectMapper mapper;
@@ -150,7 +150,7 @@ public class UserController {
             return ERRORPAGE_VIEW;
         }
 
-        if (service.isPresent() && service.get().getSelfRegistrationAllowed()) {
+        if (service.isPresent() && service.get().isSelfRegistrationAllowed()) {
             model.addAttribute("selfRegisterCommand", new SelfRegisterRequest());
             model.addAttribute(REDIRECTURI, redirectUri);
             model.addAttribute(CLIENTID, clientId);
