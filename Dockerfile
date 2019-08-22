@@ -1,6 +1,6 @@
 ARG APP_INSIGHTS_AGENT_VERSION=2.4.0
 
-FROM hmcts/cnp-java-base:openjdk-8u191-jre-alpine3.9-2.0.2
+FROM hmctspublic.azurecr.io/base/java:openjdk-8-distroless-1.1
 
 LABEL maintainer=SIDAM \
       owner="HM Courts & Tribunals Service"
