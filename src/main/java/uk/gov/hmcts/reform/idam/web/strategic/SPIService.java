@@ -1,6 +1,8 @@
 package uk.gov.hmcts.reform.idam.web.strategic;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,6 +33,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.util.UriBuilder;
+import org.springframework.web.util.UriComponents;
+import org.springframework.web.util.UriComponentsBuilder;
 import uk.gov.hmcts.reform.idam.api.internal.model.ActivationResult;
 import uk.gov.hmcts.reform.idam.api.internal.model.ArrayOfServices;
 import uk.gov.hmcts.reform.idam.api.internal.model.ForgotPasswordRequest;
@@ -42,7 +49,10 @@ import uk.gov.hmcts.reform.idam.web.health.HealthCheckStatus;
 import uk.gov.hmcts.reform.idam.web.model.RegisterUserRequest;
 import uk.gov.hmcts.reform.idam.web.model.SelfRegisterRequest;
 
+import javax.servlet.http.HttpServletRequest;
+
 import static com.netflix.zuul.constants.ZuulHeaders.X_FORWARDED_FOR;
+import static com.netflix.zuul.constants.ZuulHeaders.X_FORWARDED_PROTO;
 
 @Slf4j
 @Service
@@ -123,7 +133,7 @@ public class SPIService {
      * @should return null if no cookie is found
      * @should return a set-cookie header
      */
-    public String authenticate(final String username, final String password, final String ipAddress) {
+    public List<String> authenticate(final String username, final String password, final String ipAddress) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>(2);
         form.add("username", username);
         form.add("password", password);
@@ -136,8 +146,7 @@ public class SPIService {
             new HttpEntity<>(form, headers), Void.class);
 
         if (response.getHeaders().containsKey(HttpHeaders.SET_COOKIE)) {
-            return response.getHeaders().get(HttpHeaders.SET_COOKIE).stream()
-                .findFirst().orElse(null);
+            return new ArrayList<>(response.getHeaders().get(HttpHeaders.SET_COOKIE));
         } else {
             return null;
         }
@@ -148,12 +157,13 @@ public class SPIService {
      * @should not send state and scope parameters in form if they are not send as parameter in the service
      * @should return null if api response code is not 302
      */
-    public String authorize(final Map<String, String> params, final String cookie) {
+    public String authorize(final Map<String, String> params, final List<String> cookie) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
         if (cookie != null) {
-            headers.add(HttpHeaders.COOKIE, cookie);
+            headers.add(HttpHeaders.COOKIE, StringUtils.join(cookie, ";"));
         }
+        addUriHeaders(headers);
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>(14);
         params.forEach(form::add);
         HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(form, headers);
@@ -167,6 +177,19 @@ public class SPIService {
             return response.getHeaders().getLocation().toString();
         } else {
             return null;
+        }
+    }
+
+    private void addUriHeaders(HttpHeaders headers) {
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attributes != null) {
+            final HttpServletRequest request = attributes.getRequest();
+            UriComponents uriComponents = UriComponentsBuilder.
+                fromUriString(request.getRequestURL().toString()).build();
+            headers.add("x-forwarded-proto", uriComponents.getScheme());
+            headers.add("x-forwarded-host", uriComponents.getHost());
+            headers.add("x-forwarded-prefix", configurationProperties.getStrategic()
+                .getService().getOidcprefix());
         }
     }
 

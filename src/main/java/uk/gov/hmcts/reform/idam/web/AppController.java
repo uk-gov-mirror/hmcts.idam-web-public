@@ -36,6 +36,7 @@ import uk.gov.hmcts.reform.idam.web.model.AuthorizeRequest;
 import uk.gov.hmcts.reform.idam.web.model.ForgotPasswordRequest;
 import uk.gov.hmcts.reform.idam.web.model.RegisterUserRequest;
 import uk.gov.hmcts.reform.idam.web.model.UpliftRequest;
+import uk.gov.hmcts.reform.idam.web.strategic.PolicyService;
 import uk.gov.hmcts.reform.idam.web.strategic.SPIService;
 import uk.gov.hmcts.reform.idam.web.strategic.ValidationService;
 
@@ -43,9 +44,11 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static com.netflix.zuul.constants.ZuulHeaders.X_FORWARDED_FOR;
 import static uk.gov.hmcts.reform.idam.web.UserController.GENERIC_ERROR_KEY;
@@ -58,11 +61,12 @@ import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.EMAIL;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.ERRORPAGE_VIEW;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.ERROR_MSG;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.ERROR_SUB_MSG;
-import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.EXPIREDTOKEN_VIEW;
+import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.EXPIRED_PASSWORD_RESET_LINK_VIEW;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.FORGOTPASSWORDSUCCESS_VIEW;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.FORGOTPASSWORD_VIEW;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.HAS_ERRORS;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.HAS_LOGIN_FAILED;
+import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.HAS_POLICY_CHECK_FAILED;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.INVALID_PIN;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.IS_ACCOUNT_LOCKED;
 import static uk.gov.hmcts.reform.idam.web.helper.MvcKeys.IS_ACCOUNT_SUSPENDED;
@@ -100,6 +104,9 @@ public class AppController {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private PolicyService policyService;
+
     @Value("${authentication.secureCookie}")
     private Boolean useSecureCookie;
 
@@ -118,7 +125,7 @@ public class AppController {
     @GetMapping("/expiredtoken")
     public String expiredTokenView(final Map<String, Object> model) {
 
-        return EXPIREDTOKEN_VIEW;
+        return EXPIRED_PASSWORD_RESET_LINK_VIEW;
     }
 
     /**
@@ -244,7 +251,7 @@ public class AppController {
         try {
             spiService.validateResetPasswordToken(token, code);
         } catch (Exception e) {
-            nextPage = EXPIREDTOKEN_VIEW;
+            nextPage = EXPIRED_PASSWORD_RESET_LINK_VIEW;
         }
         return nextPage;
     }
@@ -288,6 +295,7 @@ public class AppController {
      * @should put in model the correct data and return login view if authorize service doesn't return a response url
      * @should put in model the correct error detail in case authorize service throws a HttpClientErrorException and status code is 403 then return login view
      * @should put in model the correct error variable in case authorize service throws a HttpClientErrorException and status code is not 403 then return login view
+     * @should put in model the correct error variable in case policy check fails
      * @should return forbidden if csrf token is invalid
      */
     @PostMapping("/login")
@@ -303,40 +311,46 @@ public class AppController {
         model.addAttribute(REDIRECT_URI, request.getRedirect_uri());
         model.addAttribute(SCOPE, request.getScope());
         model.addAttribute(SELF_REGISTRATION_ENABLED, request.isSelfRegistrationEnabled());
+
+        final boolean validationErrors = bindingResult.hasErrors();
+        if (validationErrors) {
+            if (StringUtils.isEmpty(request.getUsername())) {
+                model.addAttribute("isUsernameEmpty", true);
+            }
+            if (StringUtils.isEmpty(request.getPassword())) {
+                model.addAttribute("isPasswordEmpty", true);
+            }
+            model.addAttribute(HAS_ERRORS, true);
+            return nextPage;
+        }
+
         try {
-            if (bindingResult.hasErrors()) {
-                if (StringUtils.isEmpty(request.getUsername())) {
-                    model.addAttribute("isUsernameEmpty", true);
-                }
-                if (StringUtils.isEmpty(request.getPassword())) {
-                    model.addAttribute("isPasswordEmpty", true);
-                }
-                model.addAttribute(HAS_ERRORS, true);
-            } else {
-                final String ipAddress = ObjectUtils.defaultIfNull(
-                    httpRequest.getHeader(X_FORWARDED_FOR),
-                    httpRequest.getRemoteAddr());
-                final String cookie = spiService.authenticate(request.getUsername(), request.getPassword(), ipAddress);
-                String responseUrl = null;
-                if (cookie != null) {
-                    Map<String, String> params = new HashMap<>();
-                    httpRequest.getParameterMap().forEach((key, values) -> {
-                        if (values.length > 0 && !String.join(" ", values).trim().isEmpty())
-                            params.put(key, String.join(" ", values));
-                        }
-                    );
-                    params.putIfAbsent(RESPONSE_TYPE, "code");
-                    params.putIfAbsent(SCOPE, "openid profile roles");
-                    responseUrl = spiService.authorize(params, cookie);
-                }
-                if (responseUrl != null && !responseUrl.contains("error")) {
-                    response.addHeader(HttpHeaders.SET_COOKIE, makeCookieSecure(cookie));
+            final String ipAddress = ObjectUtils.defaultIfNull(
+                httpRequest.getHeader(X_FORWARDED_FOR),
+                httpRequest.getRemoteAddr());
+
+            final List<String> cookies = spiService.authenticate(request.getUsername(), request.getPassword(), ipAddress);
+            final String redirectUri = httpRequest.getParameter(REDIRECT_URI);
+            final boolean policyCheckSuccess = policyService.evaluatePoliciesForUser(redirectUri, cookies, ipAddress);;
+
+            if (policyCheckSuccess) {
+                final String responseUrl = authoriseUser(cookies, httpRequest);
+                final boolean loginSuccess = responseUrl != null && !responseUrl.contains("error");
+
+                if (loginSuccess) {
+                    log.info("Successful login - " + obfuscateEmailAddress(request.getUsername()));
+                    List<String> secureCookies = makeCookiesSecure(cookies);
+                    secureCookies.forEach(cookie -> response.addHeader(HttpHeaders.SET_COOKIE, cookie));
                     nextPage = "redirect:" + responseUrl;
                 } else {
-                    log.info("There is a problem while login in  user - " + obfuscateEmailAddress(request.getUsername()));
+                    log.info("There is a problem while logging in  user - " + obfuscateEmailAddress(request.getUsername()));
                     model.addAttribute(HAS_LOGIN_FAILED, true);
                     bindingResult.reject("Login failure");
                 }
+            } else {
+                log.info("User failed policy checks - " + obfuscateEmailAddress(request.getUsername()));
+                model.addAttribute(HAS_POLICY_CHECK_FAILED, true);
+                bindingResult.reject("Policy check failure");
             }
         } catch (HttpClientErrorException | HttpServerErrorException he) {
             log.info("Login failed for user - " + obfuscateEmailAddress(request.getUsername()));
@@ -347,22 +361,46 @@ public class AppController {
                 bindingResult.reject("Login failure");
             }
         }
+
         return nextPage;
     }
 
-    private String makeCookieSecure(String cookie) {
-        return makeCookieSecure(cookie, useSecureCookie);
+    private String authoriseUser(List<String> cookies, HttpServletRequest httpRequest) {
+        String responseUrl = null;
+        if (cookies != null) {
+            Map<String, String> params = new HashMap<>();
+            httpRequest.getParameterMap().forEach((key, values) -> {
+                    if (values.length > 0 && !String.join(" ", values).trim().isEmpty())
+                        params.put(key, String.join(" ", values));
+                }
+            );
+            params.putIfAbsent(RESPONSE_TYPE, "code");
+            params.putIfAbsent(SCOPE, "openid profile roles");
+
+            responseUrl = spiService.authorize(params, cookies);
+        }
+        return responseUrl;
+    }
+
+    private List<String> makeCookiesSecure(List<String> cookies) {
+        return makeCookiesSecure(cookies, useSecureCookie);
     }
 
     /**
      * @should return a secure cookie if useSecureCookie is true
      * @should return a non-secure cookie if useSecureCookie is false
      */
-    protected String makeCookieSecure(String cookie, boolean withSecureCookie) {
-        if (withSecureCookie) {
-            return cookie + "; Path=/; Secure; HttpOnly";
-        }
-        return cookie + "; Path=/; HttpOnly";
+    protected List<String> makeCookiesSecure(List<String> cookies, boolean withSecureCookie) {
+        return cookies.stream()
+            .map(cookie -> {
+                if (!cookie.contains("HttpOnly")) {
+                    if (withSecureCookie) {
+                        return cookie + "; Path=/; Secure; HttpOnly";
+                    }
+                    return cookie + "; Path=/; HttpOnly";
+                }
+                return cookie;
+            }).collect(Collectors.toList());
     }
 
     private void getLoginFailureReason(HttpStatusCodeException hex, Model model, BindingResult bindingResult) {

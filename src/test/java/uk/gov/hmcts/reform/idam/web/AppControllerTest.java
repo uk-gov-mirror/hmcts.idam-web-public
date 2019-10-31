@@ -20,15 +20,18 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import uk.gov.hmcts.reform.idam.api.internal.model.ErrorResponse;
 import uk.gov.hmcts.reform.idam.api.internal.model.Service;
+import uk.gov.hmcts.reform.idam.web.helper.MvcKeys;
 import uk.gov.hmcts.reform.idam.web.model.AuthorizeRequest;
 import uk.gov.hmcts.reform.idam.web.model.RegisterUserRequest;
 import uk.gov.hmcts.reform.idam.web.model.UpliftRequest;
+import uk.gov.hmcts.reform.idam.web.strategic.PolicyService;
 import uk.gov.hmcts.reform.idam.web.strategic.SPIService;
 import uk.gov.hmcts.reform.idam.web.strategic.ValidationService;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,6 +46,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyZeroInteractions;
@@ -76,6 +80,9 @@ public class AppControllerTest {
 
     @MockBean
     private ValidationService validationService;
+
+    @MockBean
+    private PolicyService policyService;
 
 
     /**
@@ -164,7 +171,7 @@ public class AppControllerTest {
         mockMvc.perform(get(EXPIRED_TOKEN_ENDPOINT))
             .andDo(print())
             .andExpect(status().isOk())
-            .andExpect(view().name(EXPIREDTOKEN_VIEW_NAME));
+            .andExpect(view().name(EXPIRED_PASSWORD_RESET_TOKEN_VIEW_NAME));
     }
 
     /**
@@ -812,7 +819,7 @@ public class AppControllerTest {
             .param(TOKEN_PARAMETER, RESET_PASSWORD_TOKEN)
             .param(CODE_PARAMETER, RESET_PASSWORD_CODE))
             .andExpect(status().isOk())
-            .andExpect(view().name(EXPIRED_TOKEN_VIEW_NAME));
+            .andExpect(view().name(EXPIRED_PASSWORD_RESET_TOKEN_VIEW_NAME));
 
         verify(spiService).validateResetPasswordToken(RESET_PASSWORD_TOKEN, RESET_PASSWORD_CODE);
     }
@@ -961,7 +968,7 @@ public class AppControllerTest {
             .param(TOKEN_PARAMETER, RESET_PASSWORD_TOKEN)
             .param(CODE_PARAMETER, RESET_PASSWORD_CODE))
             .andExpect(status().is3xxRedirection())
-            .andExpect(redirectedUrl(EXPIRED_TOKEN_VIEW_NAME));
+            .andExpect(redirectedUrl(EXPIREDTOKEN_VIEW_NAME));
 
         verify(spiService).resetPassword(eq(PASSWORD_ONE), eq(RESET_PASSWORD_TOKEN), eq(RESET_PASSWORD_CODE));
     }
@@ -1155,8 +1162,11 @@ public class AppControllerTest {
      */
     @Test
     public void login_shouldPutInModelCorrectDataThenCallAuthorizeServiceAndRedirectUsingRedirectUrlReturnedByService() throws Exception {
-        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(AUTHENTICATE_SESSION_COOKE);
-        given(spiService.authorize(any(), eq(AUTHENTICATE_SESSION_COOKE))).willReturn(REDIRECT_URI);
+        List<String> cookieList = Collections.singletonList(AUTHENTICATE_SESSION_COOKE);
+        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(cookieList);
+        given(spiService.authorize(any(), eq(cookieList))).willReturn(REDIRECT_URI);
+        given(policyService.evaluatePoliciesForUser(any(), any(), any()))
+            .willReturn(true);
 
         mockMvc.perform(post(LOGIN_ENDPOINT).with(csrf())
             .header(X_FORWARDED_FOR, USER_IP_ADDRESS)
@@ -1170,7 +1180,8 @@ public class AppControllerTest {
             .andExpect(status().is3xxRedirection())
             .andExpect(redirectedUrl(REDIRECT_URI));
 
-        verify(spiService).authorize(any(), eq(AUTHENTICATE_SESSION_COOKE));
+        verify(spiService).authorize(any(), eq(cookieList));
+        verify(policyService).evaluatePoliciesForUser(eq(REDIRECT_URI), eq(cookieList), eq(USER_IP_ADDRESS));
     }
 
     /**
@@ -1199,8 +1210,11 @@ public class AppControllerTest {
      */
     @Test
     public void login_shouldPutInModelTheCorrectDataAndReturnLoginViewIfAuthorizeServiceDoesntReturnAResponseUrl() throws Exception {
-        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(AUTHENTICATE_SESSION_COOKE);
-        given(spiService.authorize(any(), eq(AUTHENTICATE_SESSION_COOKE))).willReturn(MISSING);
+        List<String> cookieList = Collections.singletonList(AUTHENTICATE_SESSION_COOKE);
+        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(cookieList);
+        given(spiService.authorize(any(), eq(cookieList))).willReturn(MISSING);
+        given(policyService.evaluatePoliciesForUser(any(), any(), any()))
+            .willReturn(true);
 
         mockMvc.perform(post(LOGIN_ENDPOINT).with(csrf())
             .header(X_FORWARDED_FOR, USER_IP_ADDRESS)
@@ -1213,6 +1227,8 @@ public class AppControllerTest {
             .andExpect(status().isOk())
             .andExpect(model().attribute(HAS_LOGIN_FAILED, true))
             .andExpect(view().name(LOGIN_VIEW));
+
+        verify(policyService, atLeastOnce()).evaluatePoliciesForUser(any(), any(), any());
     }
 
     /**
@@ -1221,8 +1237,11 @@ public class AppControllerTest {
      */
     @Test
     public void login_shouldPutInModelTheCorrectErrorDetailInCaseAuthorizeServiceThrowsAHttpClientErrorExceptionAndStatusCodeIs403ThenReturnLoginView() throws Exception {
-        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(AUTHENTICATE_SESSION_COOKE);
-        given(spiService.authorize(any(), eq(AUTHENTICATE_SESSION_COOKE))).willThrow(new HttpClientErrorException(HttpStatus.FORBIDDEN, HttpStatus.FORBIDDEN.name(), HAS_LOGIN_FAILED_RESPONSE.getBytes(), null));
+        List<String> cookieList = Collections.singletonList(AUTHENTICATE_SESSION_COOKE);
+        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(cookieList);
+        given(spiService.authorize(any(), eq(cookieList))).willThrow(new HttpClientErrorException(HttpStatus.FORBIDDEN, HttpStatus.FORBIDDEN.name(), HAS_LOGIN_FAILED_RESPONSE.getBytes(), null));
+        given(policyService.evaluatePoliciesForUser(any(), any(), any()))
+            .willReturn(true);
 
         mockMvc.perform(post(LOGIN_ENDPOINT).with(csrf())
             .header(X_FORWARDED_FOR, USER_IP_ADDRESS)
@@ -1238,7 +1257,7 @@ public class AppControllerTest {
 
             .andExpect(view().name(LOGIN_VIEW));
 
-        given(spiService.authorize(any(), eq(AUTHENTICATE_SESSION_COOKE))).willThrow(new HttpClientErrorException(HttpStatus.FORBIDDEN, HttpStatus.FORBIDDEN.name(), ERR_LOCKED_FAILED_RESPONSE.getBytes(), null));
+        given(spiService.authorize(any(), eq(cookieList))).willThrow(new HttpClientErrorException(HttpStatus.FORBIDDEN, HttpStatus.FORBIDDEN.name(), ERR_LOCKED_FAILED_RESPONSE.getBytes(), null));
 
 
         mockMvc.perform(post(LOGIN_ENDPOINT).with(csrf())
@@ -1254,7 +1273,7 @@ public class AppControllerTest {
 
             .andExpect(view().name(LOGIN_VIEW));
 
-        given(spiService.authorize(any(), eq(AUTHENTICATE_SESSION_COOKE))).willThrow(new HttpClientErrorException(HttpStatus.FORBIDDEN, HttpStatus.FORBIDDEN.name(), ERR_SUSPENDED_RESPONSE.getBytes(), null));
+        given(spiService.authorize(any(), eq(cookieList))).willThrow(new HttpClientErrorException(HttpStatus.FORBIDDEN, HttpStatus.FORBIDDEN.name(), ERR_SUSPENDED_RESPONSE.getBytes(), null));
 
 
         mockMvc.perform(post(LOGIN_ENDPOINT).with(csrf())
@@ -1279,8 +1298,11 @@ public class AppControllerTest {
      */
     @Test
     public void login_shouldPutInModelTheCorrectErrorVariableInCaseAuthorizeServiceThrowsAHttpClientErrorExceptionAndStatusCodeIsNot403ThenReturnLoginView() throws Exception {
-        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(AUTHENTICATE_SESSION_COOKE);
-        given(spiService.authorize(any(), eq(AUTHENTICATE_SESSION_COOKE))).willThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST));
+        List<String> cookieList = Collections.singletonList(AUTHENTICATE_SESSION_COOKE);
+        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(cookieList);
+        given(spiService.authorize(any(), eq(cookieList))).willThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST));
+        given(policyService.evaluatePoliciesForUser(any(), any(), any()))
+            .willReturn(true);
 
         mockMvc.perform(post(LOGIN_ENDPOINT).with(csrf())
             .header(X_FORWARDED_FOR, USER_IP_ADDRESS)
@@ -1491,22 +1513,51 @@ public class AppControllerTest {
 
     /**
      * @verifies return a secure cookie if useSecureCookie is true
-     * @see AppController#makeCookieSecure(String, boolean)
+     * @see AppController#makeCookiesSecure(List, boolean)
      */
     @Test
-    public void makeCookieSecure_shouldReturnASecureCookieIfUseSecureCookieIsTrue() throws Exception {
+    public void makeCookiesSecure_shouldReturnASecureCookieIfUseSecureCookieIsTrue() throws Exception {
         AppController appController = new AppController();
-        assertThat(appController.makeCookieSecure(AUTHENTICATE_SESSION_COOKE, true), is(AUTHENTICATE_SESSION_COOKE + "; Path=/; Secure; HttpOnly"));
+        assertThat(appController.makeCookiesSecure(Collections.singletonList(INSECURE_SESSION_COOKE), true), is(Collections.singletonList(AUTHENTICATE_SESSION_COOKE)));
     }
 
     /**
      * @verifies return a non-secure cookie if useSecureCookie is false
-     * @see AppController#makeCookieSecure(String, boolean)
+     * @see AppController#makeCookiesSecure(List, boolean)
      */
     @Test
-    public void makeCookieSecure_shouldReturnANonsecureCookieIfUseSecureCookieIsFalse() throws Exception {
+    public void makeCookiesSecure_shouldReturnANonsecureCookieIfUseSecureCookieIsFalse() throws Exception {
         AppController appController = new AppController();
-        assertThat(appController.makeCookieSecure(AUTHENTICATE_SESSION_COOKE, false), is(AUTHENTICATE_SESSION_COOKE + "; Path=/; HttpOnly"));
+        assertThat(appController.makeCookiesSecure(Collections.singletonList(INSECURE_SESSION_COOKE), false), is(Collections.singletonList(INSECURE_SESSION_COOKE + "; Path=/; HttpOnly")));
     }
 
+    /**
+     * @verifies put in model the correct error variable in case policy check fails
+     * @see AppController#login(AuthorizeRequest, BindingResult, Model, HttpServletRequest, HttpServletResponse)
+     */
+    @Test
+    public void login_shouldPutInModelTheCorrectErrorVariableInCasePolicyCheckFails() throws Exception {
+        List<String> cookieList = Collections.singletonList(AUTHENTICATE_SESSION_COOKE);
+        given(spiService.authenticate(eq(USER_EMAIL), eq(USER_PASSWORD), eq(USER_IP_ADDRESS))).willReturn(cookieList);
+        given(spiService.authorize(any(), eq(cookieList))).willReturn(REDIRECT_URI);
+        given(policyService.evaluatePoliciesForUser(any(), any(), any()))
+            .willReturn(false);
+
+        mockMvc.perform(post(LOGIN_ENDPOINT).with(csrf())
+            .header(X_FORWARDED_FOR, USER_IP_ADDRESS)
+            .param(USERNAME_PARAMETER, USER_EMAIL)
+            .param(PASSWORD_PARAMETER, USER_PASSWORD)
+            .param(REDIRECT_URI, REDIRECT_URI)
+            .param(STATE_PARAMETER, STATE)
+            .param(RESPONSE_TYPE_PARAMETER, RESPONSE_TYPE)
+            .param(CLIENT_ID_PARAMETER, CLIENT_ID)
+            .param(SCOPE_PARAMETER, CUSTOM_SCOPE))
+            .andExpect(status().isOk())
+            .andExpect(model().attribute(MvcKeys.HAS_POLICY_CHECK_FAILED, true))
+            .andExpect(view().name(LOGIN_VIEW));
+
+        verify(spiService, never()).authorize(any(), eq(cookieList));
+
+        verify(policyService).evaluatePoliciesForUser(eq(REDIRECT_URI), eq(cookieList), eq(USER_IP_ADDRESS));
+    }
 }

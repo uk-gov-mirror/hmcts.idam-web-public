@@ -4,19 +4,18 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import lombok.Data;
 
-
 @ConfigurationProperties(prefix = "strategic")
 @Data
 public class StrategicConfigurationProperties {
 
     private ServiceConfigurationProperties service;
     private EndpointConfigurationProperties endpoint;
-
+    private Policies policies;
 
     @Data
     public static class ServiceConfigurationProperties {
-
         private String url;
+        private String oidcprefix;
     }
 
     @Data
@@ -39,5 +38,11 @@ public class StrategicConfigurationProperties {
         private String details;
         private String services;
         private String health;
+        private String evaluatePolicies;
+    }
+
+    @Data
+    public static class Policies {
+        private String applicationName;
     }
 }
