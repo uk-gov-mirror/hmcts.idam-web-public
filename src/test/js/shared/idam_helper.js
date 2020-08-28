@@ -1,6 +1,8 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 let Helper = codecept_helper;
 const TestData = require('../config/test_data');
 const fetch = require('node-fetch');
+var FormData = require('form-data');
 
 let agentToUse;
 if (process.env.PROXY_SERVER) {
@@ -741,6 +743,83 @@ class IdamHelper extends Helper {
         }).then((response) => {
             if (response.status !== 200) {
                 console.log('Error retiring stale user', response.status);
+                throw new Error();
+            }
+        });
+    }
+
+    getAADAccessToken(code, redirectUri) {
+        let formData = new FormData();
+        formData.append('code', code);
+        formData.append('redirect_uri', redirectUri);
+        formData.append('grant_type', 'authorization_code');
+        formData.append('client_id', TestData.SSO_CLIENT_ID);
+        formData.append('client_secret', TestData.SSO_CLIENT_SECRET);
+
+        console.log("formData: "+ formData.toString())
+        return fetch('https://login.microsoftonline.com/723e4557-2f17-43ed-9e71-f1beb253e546/oauth2/token', {
+            method: 'POST',
+            body: formData,
+        }).then(response => {
+            console.log(response);
+            return response.json();
+        }).then((json) => {
+            return json.access_token;
+        }).catch(err => {
+            console.log(err)
+            let browser = this.helpers['Puppeteer'].browser;
+            browser.close();
+        });
+    }
+
+    async createFederatedUser(accessToken) {
+        const data = {
+            ssoProvider: 'ejudiciary-aad'
+        };
+        return fetch(`${TestData.IDAM_API}/api/v1/federatedusers`, {
+            agent: agent,
+            method: 'POST',
+            body: JSON.stringify(data),
+            headers: {'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json'},
+        }).then(res => res.json())
+            .then((json) => {
+                return json;
+            })
+            .catch(err => err);
+    }
+
+    async getFederatedUser(accessToken) {
+        return fetch(`${TestData.IDAM_API}/api/v1/federatedusers/me`, {
+            agent: agent,
+            method: 'GET',
+            headers: {'Authorization': 'Bearer ' + accessToken, 'Accept': 'application/json'},
+        }).then(res => res.json())
+            .then((json) => {
+                return json;
+            })
+            .catch(err => err);
+    }
+
+    async updateFederatedUser(accessToken) {
+        return fetch(`${TestData.IDAM_API}/api/v1/federatedusers/me`, {
+            agent: agent,
+            method: 'PUT',
+            headers: {'Authorization': 'Bearer ' + accessToken},
+        }).then(res => res.json())
+            .then((json) => {
+                return json;
+            })
+            .catch(err => err);
+    }
+
+    authenticateFederatedUser(accessToken) {
+        return fetch(`${TestData.IDAM_API}/api/v1/federatedusers/authenticate`, {
+            agent: agent,
+            method: 'POST',
+            headers: {'Authorization': 'Bearer ' + accessToken},
+        }).then((response) => {
+            if (response.status !== 200) {
+                console.log('Error authenticating ejudiciary user', response.status);
                 throw new Error();
             }
         });

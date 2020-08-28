@@ -5,11 +5,14 @@ const randomData = require('./shared/random_data');
 
 Feature('eJudiciary login tests');
 
+let randomUserFirstName;
 let serviceNames = [];
 
 const serviceName = randomData.getRandomServiceName();
 
 BeforeSuite(async (I) => {
+    randomUserFirstName = randomData.getRandomUserName();
+
     const token = await I.getAuthToken();
     await I.createService(serviceName, '', token, 'openid profile roles', [TestData.EJUDICIARY_SSO_PROVIDER_KEY]);
     serviceNames.push(serviceName);
@@ -99,4 +102,68 @@ Scenario('@functional @ejudiciary As an ejudiciary user, I should be able to log
     }
 
     I.resetRequestInterception();
+});
+
+
+Scenario('@federateduserapis call federated user endpoints with the aad token', async (I) => {
+    I.amOnPage('https://login.microsoftonline.com/723e4557-2f17-43ed-9e71-f1beb253e546/oauth2/authorize?client_id=a3810c50-f3da-4f66-bef3-aa20182ce85c&response_type=code&redirect_uri=http://localhost:7070/login/oauth2/code/oidc&response_mode=query&scope=openid%20profile%20email');
+    I.waitForText('Sign in', 20);
+    I.fillField('loginfmt', TestData.EJUDICIARY_TEST_USER_USERNAME);
+    I.click('Next');
+    I.waitForText('Enter password', 20);
+    I.fillField('passwd', TestData.EJUDICIARY_TEST_USER_PASSWORD);
+    I.click('Sign in');
+    I.waitForText('Stay signed in?', 20);
+    I.interceptRequestsAfterSignin();
+    I.click('No');
+
+    const pageSource = await I.grabSource();
+    const code = pageSource.match(/\?code=([^&]*)(.*)/)[1];
+    console.log("code: " + code)
+
+    const accessToken = await I.getAADAccessToken(code, "http://localhost:7070/login/oauth2/code/oidc");
+
+    I.resetRequestInterception();
+
+    I.deleteUser(TestData.EJUDICIARY_TEST_USER_USERNAME);
+
+    // Create ejudiciary user
+    const createEjudiciaryShadowUserApiResponse = await I.createFederatedUser(accessToken);
+    expect(createEjudiciaryShadowUserApiResponse.id).to.not.equal(null);
+    expect(createEjudiciaryShadowUserApiResponse.active).to.equal(true);
+    expect(createEjudiciaryShadowUserApiResponse.forename).to.equal('SIDM EJUD');
+    expect(createEjudiciaryShadowUserApiResponse.surname).to.equal('TEST A');
+    expect(createEjudiciaryShadowUserApiResponse.email).to.equal(TestData.EJUDICIARY_TEST_USER_USERNAME);
+    expect(createEjudiciaryShadowUserApiResponse.roles).to.eql(['judiciary']);
+    expect(createEjudiciaryShadowUserApiResponse.ssoProvider).to.eql('azure');
+    expect(createEjudiciaryShadowUserApiResponse.ssoId).to.not.equal(null);
+
+    //  Get ejudiciary user details
+    const getEjudiciaryShadowUserApiResponse = await I.getFederatedUser(accessToken);
+    expect(getEjudiciaryShadowUserApiResponse.id).to.not.equal(null);
+    expect(getEjudiciaryShadowUserApiResponse.active).to.equal(true);
+    expect(getEjudiciaryShadowUserApiResponse.forename).to.equal('SIDM EJUD');
+    expect(getEjudiciaryShadowUserApiResponse.surname).to.equal('TEST A');
+    expect(getEjudiciaryShadowUserApiResponse.email).to.equal(TestData.EJUDICIARY_TEST_USER_USERNAME);
+    expect(getEjudiciaryShadowUserApiResponse.roles).to.eql(['judiciary']);
+    expect(getEjudiciaryShadowUserApiResponse.ssoProvider).to.eql('azure');
+    expect(getEjudiciaryShadowUserApiResponse.ssoId).to.not.equal(null);
+
+    I.deleteUser(TestData.EJUDICIARY_TEST_USER_USERNAME);
+
+    // Update ejudiciary user
+    await I.createUserWithRoles(TestData.EJUDICIARY_TEST_USER_USERNAME, randomUserFirstName + 'Citizen', ["citizen"]);
+    const updateEjudiciaryUserApiResponse = await I.updateFederatedUser(accessToken);
+    expect(updateEjudiciaryUserApiResponse.id).to.not.equal(null);
+    expect(updateEjudiciaryUserApiResponse.active).to.equal(true);
+    expect(updateEjudiciaryUserApiResponse.forename).to.equal('SIDM EJUD');
+    expect(updateEjudiciaryUserApiResponse.surname).to.equal('TEST A');
+    expect(updateEjudiciaryUserApiResponse.email).to.equal(TestData.EJUDICIARY_TEST_USER_USERNAME);
+    expect(updateEjudiciaryUserApiResponse.roles).to.deep.equalInAnyOrder(['judiciary', 'citizen']);
+
+    expect(updateEjudiciaryUserApiResponse.ssoProvider).to.eql('azure');
+    expect(updateEjudiciaryUserApiResponse.ssoId).to.not.equal(null);
+
+    // Authenticate ejudiciary user
+    I.authenticateFederatedUser(accessToken);
 });
