@@ -212,6 +212,8 @@ sonarqube {
       "**/uk/gov/hmcts/reform/idam/web/model/*.java," +
       "**/uk/gov/hmcts/reform/idam/web/helper/MvcKeys.java," +
       "**/uk/gov/hmcts/reform/idam/web/Application.java," +
+      "**/uk/gov/hmcts/reform/idam/web/sso/SSOZuulFilter.java," +
+      "**/uk/gov/hmcts/reform/idam/web/strategic/StepUpAuthenticationZuulFilter.java," +
       "**/*Exception.java"
     property "sonar.host.url", "https://sonar.reform.hmcts.net/"
     property "sonar.pitest.mode", "reuseReport"
