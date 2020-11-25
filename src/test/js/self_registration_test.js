@@ -195,7 +195,6 @@ Scenario('@functional @selfregister @welshLanguage I can self register (Welsh)',
 Scenario('@functional @selfregister I can self register and cannot use activation link again', async (I) => {
 
     const email = 'test_citizen.' + randomData.getRandomEmailAddress();
-    const loginPage = `${TestData.WEB_PUBLIC_URL}/login?redirect_uri=${TestData.SERVICE_REDIRECT_URI}&client_id=${serviceName}&state=selfreg`;
 
     I.amOnPage(selfRegUrl);
     I.waitInUrl('users/selfRegister', 180);
@@ -366,5 +365,42 @@ Scenario('@functional @selfregister @staleuserregister stale user should get you
     I.wait(5);
     const emailResponse = await I.getEmail(staleUserEmail);
     assert.equal('You already have an account', emailResponse.subject);
+});
 
+Scenario('@functional @selfregister I can create a password only once using the activation link opened in multiple tabs', async (I) => {
+
+    const email = 'test_citizen.' + randomData.getRandomEmailAddress();
+
+    I.amOnPage(selfRegUrl);
+    I.waitInUrl('users/selfRegister', 180);
+    I.waitForText('Create an account or sign in', 20, 'h1');
+
+    I.see('Create an account');
+    I.fillField('firstName', randomUserFirstName);
+    I.fillField('lastName', randomUserLastName);
+    I.fillField('email', email);
+    I.click("Continue");
+    I.waitForText('Check your email', 20, 'h1');
+    I.wait(5);
+    const userActivationUrl = await I.extractUrl(email);
+    I.amOnPage(userActivationUrl);
+    I.waitForText('Create a password', 20, 'h1');
+
+    I.openNewTab();
+    I.amOnPage(userActivationUrl);
+    I.waitForText('Create a password', 20, 'h1');
+    I.seeTitleEquals('User Activation - HMCTS Access');
+    I.fillField('#password1', TestData.PASSWORD);
+    I.fillField('#password2', TestData.PASSWORD);
+    I.click('Continue');
+    I.waitForText('Account created', 20, 'h1');
+    I.wait(3);
+    I.see('You can now sign in to your account.');
+
+    I.switchToPreviousTab();
+    I.wait(3);
+    I.fillField('#password1', TestData.PASSWORD);
+    I.fillField('#password2', TestData.PASSWORD);
+    I.click('Continue');
+    I.waitForText('Your account is already activated.', 40, 'h1');
 });
