@@ -64,7 +64,7 @@ Scenario('@functional @mfaLogin I am able to login with MFA', async (I) => {
 
     I.fillField('code', otpCode);
     I.interceptRequestsAfterSignin();
-    I.click('Submit');
+    I.click('Continue');
     I.waitForText(mfaTurnedOnService.activationRedirectUrl.toLowerCase());
     I.see('code=');
     I.dontSee('error=');
@@ -83,7 +83,7 @@ Scenario('@functional @mfaLogin I am able to login with MFA', async (I) => {
     const oidcUserInfo = await I.retry({retries: 3, minTimeout: 10000}).getWebpublicOidcUserInfo(accessToken);
     expect(oidcUserInfo.sub.toUpperCase()).to.equal(mfaUserEmail.toUpperCase());
     expect(oidcUserInfo.uid).to.not.equal(null);
-    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.id, mfaTurnedOffServiceRole.id]);
+    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.name, mfaTurnedOffServiceRole.name]);
     expect(oidcUserInfo.name).to.equal(randomUserFirstName + ' User');
     expect(oidcUserInfo.given_name).to.equal(randomUserFirstName);
     expect(oidcUserInfo.family_name).to.equal('User');
@@ -128,7 +128,7 @@ Scenario('@functional @mfaLogin @welshLanguage I am able to login with MFA in We
     const oidcUserInfo = await I.retry({retries: 3, minTimeout: 10000}).getWebpublicOidcUserInfo(accessToken);
     expect(oidcUserInfo.sub.toUpperCase()).to.equal(mfaUserEmail.toUpperCase());
     expect(oidcUserInfo.uid).to.not.equal(null);
-    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.id, mfaTurnedOffServiceRole.id]);
+    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.name, mfaTurnedOffServiceRole.name]);
     expect(oidcUserInfo.name).to.equal(randomUserFirstName + ' User');
     expect(oidcUserInfo.given_name).to.equal(randomUserFirstName);
     expect(oidcUserInfo.family_name).to.equal('User');
@@ -136,8 +136,9 @@ Scenario('@functional @mfaLogin @welshLanguage I am able to login with MFA in We
     I.resetRequestInterception();
 }).retry(TestData.SCENARIO_RETRY_LIMIT);
 
-Scenario('@functional @mfaLogin Validate verification code and 3 incorrect otp attempts should redirect user to the sign in page', async (I) => {
-    const loginUrl = `${TestData.WEB_PUBLIC_URL}/login?redirect_uri=${mfaTurnedOnService.activationRedirectUrl}&client_id=${mfaTurnedOnService.oauth2ClientId}`;
+Scenario('@functional @mfaLogin Validate verification code and 3 incorrect otp attempts otp expired message and continue button should be present', async (I) => {
+    const nonce = "0km9sBrZfnXv8e_O7U-XmSR6vtIhsUVTutbVUdoLV7g";
+    const loginUrl = `${TestData.WEB_PUBLIC_URL}/login?redirect_uri=${mfaTurnedOnService.activationRedirectUrl}&client_id=${mfaTurnedOnService.oauth2ClientId}&state=44p4OfI5CXbdvMTpRYWfleNWIYm5ed0qNDgMOm2qgpU&nonce=${nonce}&response_type=code&scope=openid profile roles manage-user create-user&prompt=`;
 
     I.amOnPage(loginUrl);
     I.waitForText('Sign in', 20, 'h1');
@@ -151,32 +152,35 @@ Scenario('@functional @mfaLogin Validate verification code and 3 incorrect otp a
 
     // empty field
     I.fillField('code', '');
-    I.click('Submit');
-    I.waitForText('Enter a verification code', 5, '.error-message');
+    I.click('Continue');
+    I.waitForText('Enter a correct verification code', 5, '.error-message');
     // other than digits
     I.fillField('code', '663h8w7g');
-    I.click('Submit');
-    I.see('Enter numbers only');
+    I.click('Continue');
+    I.see('Enter a correct verification code');
     // not 8 digit otp
     I.fillField('code', `1${otpCode}`);
-    I.click('Submit');
-    I.see('Enter a valid verification code');
+    I.click('Continue');
+    I.see('Enter a correct verification code');
     // invalid otp
     I.fillField('code', '12345678');
-    I.click('Submit');
-    I.see('Verification code incorrect, try again');
+    I.click('Continue');
+    I.see('Enter a correct verification code');
     // invalid otp
     I.fillField('code', '74646474');
-    I.click('Submit');
-    I.see('Verification code incorrect, try again');
+    I.click('Continue');
+    I.see('Enter a correct verification code');
 
     // invalid otp
     I.fillField('code', '94837292');
-    I.click('Submit');
-    // after 3 incorrect attempts redirect user back to the sign in page
+    I.click('Continue');
+    // after 3 incorrect attempts, user should start the login/journey again.
+    I.seeInCurrentUrl("/expiredcode");
+    I.see('We’ve been unable to sign you in because your verification code has expired.');
+    I.see('You’ll need to start again.');
+    I.click('Continue');
+
     I.seeInCurrentUrl("/login");
-    I.see('Verification code check failed');
-    I.see('Your verification code check has failed, please retry');
     I.fillField('#username', mfaUserEmail);
     I.fillField('#password', TestData.PASSWORD);
     I.click('Sign in');
@@ -187,14 +191,34 @@ Scenario('@functional @mfaLogin Validate verification code and 3 incorrect otp a
 
     // previously generated otp should be invalidated
     I.fillField('code', otpCode);
-    I.click('Submit');
-    I.waitForText('Verification code incorrect, try again', 5, '.error-message');
+    I.click('Continue');
+    I.waitForText('Enter a correct verification code', 5, '.error-message');
     I.fillField('code', otpCodeLatest);
     I.interceptRequestsAfterSignin();
-    I.click('Submit');
+    I.click('Continue');
     I.waitForText(mfaTurnedOnService.activationRedirectUrl.toLowerCase());
     I.see('code=');
     I.dontSee('error=');
+
+    let pageSource = await I.grabSource();
+    let code = pageSource.match(/\?code=([^&]*)(.*)/)[1];
+    let accessToken = await I.getAccessToken(code, mfaTurnedOnService.oauth2ClientId, mfaTurnedOnService.activationRedirectUrl, TestData.SERVICE_CLIENT_SECRET);
+
+    let jwtDecode = await jwt_decode(accessToken);
+
+    assert.equal("access_token", jwtDecode.tokenName);
+    assert.equal(nonce, jwtDecode.nonce);
+    assert.equal(1, jwtDecode.auth_level);
+
+    //Webpublic OIDC userinfo
+    const oidcUserInfo = await I.retry({retries: 3, minTimeout: 10000}).getWebpublicOidcUserInfo(accessToken);
+    expect(oidcUserInfo.sub.toUpperCase()).to.equal(mfaUserEmail.toUpperCase());
+    expect(oidcUserInfo.uid).to.not.equal(null);
+    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.name, mfaTurnedOffServiceRole.name]);
+    expect(oidcUserInfo.name).to.equal(randomUserFirstName + ' User');
+    expect(oidcUserInfo.given_name).to.equal(randomUserFirstName);
+    expect(oidcUserInfo.family_name).to.equal('User');
+
     I.resetRequestInterception();
 }).retry(TestData.SCENARIO_RETRY_LIMIT);
 
@@ -229,13 +253,13 @@ Scenario('@functional @mfaLogin @mfaDisabledUserLogin As a mfa disabled user I c
     expect(userInfo.forename).to.equal(randomUserFirstName + 'mfadisabled');
     expect(userInfo.id).to.not.equal(null);
     expect(userInfo.surname).to.equal('User');
-    expect(userInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.id, 'idam-mfa-disabled']);
+    expect(userInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.name, 'idam-mfa-disabled']);
 
     //Webpublic OIDC userinfo
     const oidcUserInfo = await I.retry({retries: 3, minTimeout: 10000}).getWebpublicOidcUserInfo(accessToken);
     expect(oidcUserInfo.sub.toUpperCase()).to.equal(mfaDisabledUserEmail.toUpperCase());
     expect(oidcUserInfo.uid).to.not.equal(null);
-    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.id, 'idam-mfa-disabled']);
+    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.name, 'idam-mfa-disabled']);
 
     expect(oidcUserInfo.name).to.equal(randomUserFirstName + 'mfadisabled' + ' User');
     expect(oidcUserInfo.given_name).to.equal(randomUserFirstName + 'mfadisabled');
@@ -278,7 +302,7 @@ Scenario('@functional @mfaLogin @mfaStepUpLogin As a user, I can login with clie
     const otpCode = await I.extractOtpFromEmail(mfaUserEmail);
 
     I.fillField('code', otpCode);
-    I.click('Submit');
+    I.click('Continue');
     I.waitForText(mfaTurnedOnService.activationRedirectUrl.toLowerCase());
     I.see('code=');
     I.dontSee('error=');
@@ -300,13 +324,13 @@ Scenario('@functional @mfaLogin @mfaStepUpLogin As a user, I can login with clie
     expect(userInfo.forename).to.equal(randomUserFirstName);
     expect(userInfo.id).to.not.equal(null);
     expect(userInfo.surname).to.equal('User');
-    expect(userInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.id, mfaTurnedOffServiceRole.id]);
+    expect(userInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.name, mfaTurnedOffServiceRole.name]);
 
     //Webpublic OIDC userinfo
     const oidcUserInfo = await I.retry({retries: 3, minTimeout: 10000}).getWebpublicOidcUserInfo(accessToken);
     expect(oidcUserInfo.sub.toUpperCase()).to.equal(mfaUserEmail.toUpperCase());
     expect(oidcUserInfo.uid).to.not.equal(null);
-    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.id, mfaTurnedOffServiceRole.id]);
+    expect(oidcUserInfo.roles).to.deep.equalInAnyOrder([mfaTurnedOnServiceRole.name, mfaTurnedOffServiceRole.name]);
 
     expect(oidcUserInfo.name).to.equal(randomUserFirstName + ' User');
     expect(oidcUserInfo.given_name).to.equal(randomUserFirstName);
